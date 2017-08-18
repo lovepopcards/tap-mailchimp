@@ -3,18 +3,22 @@
 """Mailchimp tap for singer.io"""
 
 import json
+import requests
 import singer
 import singer.utils
 import singer.logger
+from mailchimp3 import MailChimp
 
 REQUIRED_CONFIG_KEYS = ['user_agent', 'username', 'api_key']
 API_ROOT = 'https://us3.api.mailchimp.com/3.0'
 
-def pluck(dict_, *args):
-    return (dict_[k] for k in args)
+def pluck(dict_, *keys):
+    """Return iterable of values for given keys in dict_"""
+    return (dict_[k] for k in keys)
 
-def pluck_except(dict_, *args):
-    keys = set(dict_.keys()) - set(args)
+def pluck_except(dict_, *exclude_keys):
+    """Return iterable of values in dict_ except for given keys"""
+    keys = set(dict_.keys()) - set(exclude_keys)
     return pluck(dict_, keys)
 
 def mailchimp_gen(base, attr, **kwargs):
