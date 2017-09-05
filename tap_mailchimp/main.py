@@ -1,6 +1,5 @@
 """Entry point for tap-mailchimp."""
 
-from singer import Catalog
 from singer.utils import parse_args
 import tap_mailchimp.config as tapconfig
 from tap_mailchimp.tap import MailChimpTap
@@ -10,14 +9,11 @@ def main():
     args = parse_args(tapconfig.required_keys)
     tap = MailChimpTap(args.config, args.state)
     if args.discover:
-        catalog = tap.discover()
-        catalog.dump()
+        raise NotImplementedError('Discovery not yet implemented.')
     elif args.catalog is not None:
-        tap.catalog = args.catalog
-        tap.pour()
+        raise NotImplementedError('Catalog support not yet implemented.')
     elif args.properties is not None:
-        tap.catalog = Catalog.from_dict(args.properties)
-        tap.pour()
+        raise NotImplementedError('Properties support not yet implemented.')
     else:
         tap.pour()
     return 0

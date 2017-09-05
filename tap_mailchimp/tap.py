@@ -58,31 +58,6 @@ class MailChimpTap:
         self.state = state
         username, api_key = config[cfg.username], config[cfg.api_key]
         self.client = mailchimp3.MailChimp(username, api_key)
-        self.catalog = catalog
-
-    @property
-    def catalog(self):
-        """singer.Catalog for the MailChimp v3 API."""
-        if self._catalog is None:
-            self._catalog = self.discover()
-        return self._catalog
-
-    @catalog.setter
-    def catalog(self, c):
-        self._catalog = c
-
-    def discover(self):
-        """Return a singer.io Catalog for the MailChimp v3 API.
-
-        :return: Singer.io Catalog instance.
-        :rtype: singer.Catalog
-        """
-        catalog = {'streams': [{'stream': s,
-                                'tap_stream_id': s,
-                                'key_properties': cfg.key_properties[s],
-                                'schema': taputils.get_schema(s)}
-                               for s in cfg.all_streams]}
-        return singer.Catalog.from_dict(catalog)
 
     def start_date(self, stream, use_lag=True):
         """Return the time to start the stream.
@@ -114,10 +89,10 @@ class MailChimpTap:
     def pour(self):
         """Pour schemata and data from the Mailchimp tap."""
         with singer.job_timer(job_type='mailchimp'):
-            for s in self.catalog.streams:
-                pour_method = getattr(self, 'pour_{}'.format(s.stream))
-                pour_method()
-                singer.write_state(self.state)
+            self.pour_lists()
+            self.pour_list_members()
+            self.pour_campaigns()
+            self.pour_email_activity_reports()
             singer.write_state(self.state)
 
     def _gen_args(self, stream, date_key=None, with_count=True, use_lag=True):
