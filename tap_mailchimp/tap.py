@@ -11,7 +11,7 @@ DEFAULT_COUNT = 50
 DEFAULT_LAG = 7
 
 
-def mailchimp_gen(base, attr, item_key=None, **kwargs):
+def mailchimp_gen(base, attr, endpoint=None, item_key=None, **kwargs):
     """Generator to iterate over mailchimp responses.
 
     Mailchimp returns a subset of total data, and uses an `offset` parameter to
@@ -19,31 +19,39 @@ def mailchimp_gen(base, attr, item_key=None, **kwargs):
     needed.
 
     Usage:
+
         >>> for item in mailchimp_gen(client, 'lists'):
         >>>     process(item)
         >>> for item in mailchimp_gen(client, 'authorized_apps', item_key='apps'):
         >>>     process(item)
 
     Args:
+
     :param base: mailchimp3.MailChimp or API child object
+
     :param attr: Name of child object to base the generator on
+
+    :param endpoint: Endpoint name for singer.http_request_timer (optional,
+                     defaults to attr)
+
     :param item_key: Key for list items (optional, defaults to attr)
+
     :param **kwargs: Arguments passed on to the API object's `all` method (e.g.
                      list_id for list members)
     """
     process_count, total_items = 0, 1
     if item_key is None:
         item_key = attr
+    if endpoint is None:
+        endpoint = attr
     api_method = getattr(base, attr)
     while process_count < total_items:
-        with singer.http_request_timer(endpoint=attr):
+        with singer.http_request_timer(endpoint=endpoint):
             response = api_method.all(offset=process_count, **kwargs)
         items, total_items = taputils.pluck(response, item_key, 'total_items')
         for i in items:
             yield i
             process_count += 1
-        # TODO find more elegant way to test early stopping!
-        return
 
 
 class MailChimpTap:
@@ -82,6 +90,12 @@ class MailChimpTap:
     def lag(self):
         return self.config.get('lag_days', DEFAULT_LAG)
 
+    @property
+    def lag_date(self):
+        if self.start_date is None:
+            return None
+        return self.start_date - dt.timedelta(days=self.lag)
+
     def pour(self):
         """Pour schemata and data from the Mailchimp tap."""
         with singer.job_timer(job_type='mailchimp'):
@@ -116,7 +130,7 @@ class MailChimpTap:
                 args['since_last_changed'] = self.start_date.isoformat()
             with singer.record_counter(endpoint=name) as counter:
                 for id in list_ids:
-                    for record in mailchimp_gen(self.client.lists, 'members',
+                    for record in mailchimp_gen(self.client.lists, 'members', endpoint=name,
                                                 list_id=id, count=self.count, **args):
                         singer.write_record(name, record)
                         counter.increment()
@@ -124,17 +138,16 @@ class MailChimpTap:
     def pour_campaigns(self):
         name = 'campaigns'
         campaign_ids = set()
-        with job_timer(job_type=name):
+        with singer.job_timer(job_type=name):
             schema = taputils.get_schema(name)
             singer.write_schema(name, schema, key_properties='id')
-            if self.start_date is None:
+            if self.lag_date is None:
                 gen = mailchimp_gen(self.client, name, count=self.count)
             else:
-                past_date = self.start_date - dt.timedelta(days=self.lag)
                 gen_create = mailchimp_gen(self.client, name, count=self.count,
-                                           since_create_time=past_date.isoformat())
+                                           since_create_time=self.lag_date.isoformat())
                 gen_send = mailchimp_gen(self.client, name, count=self.count,
-                                         since_send_time=past_date.isoformat())
+                                         since_send_time=self.lag_date.isoformat())
                 gen = itertools.chain(gen_create, gen_send)
             with singer.record_counter(endpoint=name) as counter:
                 for record in gen:
@@ -154,7 +167,7 @@ class MailChimpTap:
             singer.write_schema(name, schema, key_properties=['campaign_id', 'email_id'])
             with singer.record_counter(endpoint=name) as counter:
                 for id in campaign_ids:
-                    for record in mailchimp_gen(self.client.reports, 'email_activity',
-                                                campaign_id=id, count=self.count):
+                    for record in mailchimp_gen(self.client.reports, 'email_activity', endpoint=name,
+                                                item_key='emails', campaign_id=id, count=self.count):
                         singer.write_record(name, record)
                         counter.increment()
