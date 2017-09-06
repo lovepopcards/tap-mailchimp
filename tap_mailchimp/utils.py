@@ -4,11 +4,22 @@ from collections import abc
 from functools import lru_cache
 import requests
 from singer import http_request_timer
-import tap_mailchimp.config as tapconfig
+
 
 def pluck(dict_, *keys):
     """Return iterable of values for given keys in dict_"""
     return (dict_[k] for k in keys)
+
+
+def schema_url_from_path(path):
+    return 'https://us3.api.mailchimp.com/schema/3.0/Definitions/{}/Response.json'.format(path)
+
+
+SCHEMA_URL = {'lists': schema_url_from_path('Lists'),
+              'list_members': schema_url_from_path('Lists/Members'),
+              'campaigns': schema_url_from_path('Campaigns'),
+              'email_activity_reports': schema_url_from_path('Reports/EmailActivity')}
+
 
 @lru_cache(maxsize=128, typed=False)
 def download_schema(schema_url):
@@ -21,6 +32,7 @@ def download_schema(schema_url):
     with http_request_timer(endpoint="schemas"):
         return requests.get(schema_url).json()
 
+
 @lru_cache(maxsize=128, typed=False)
 def get_schema(stream):
     """Get schema for stream with given stream name.
@@ -29,9 +41,10 @@ def get_schema(stream):
     :return: JSON Schema.
     :rtype: dict
     """
-    schema = download_schema(tapconfig.schema_url[stream])
+    schema = download_schema(SCHEMA_URL[stream])
     process_schema(schema)
     return schema
+
 
 def process_schema(schema):
     """Apply cleanups to MailChimp JSON schema."""
@@ -39,6 +52,7 @@ def process_schema(schema):
     walk(schema, fill_in_refs)
     # Sometimes the datetimes are just empty strings, which won't validate.
     walk(schema, fix_date_time_format)
+
 
 def fill_in_refs(node):
     """Download and fill in $ref schemas for JSON schema node."""
@@ -48,41 +62,24 @@ def fill_in_refs(node):
     except (TypeError, KeyError):
         pass
 
+
 def fix_date_time_format(node):
     """Fix date-time formatted types in JSON schema node.
 
     Sometimes the datetimes are just empty strings, which won't validate. Here
-    we replace type with ["null", "string"]. Then in the data we have to
-    replace empty strings with nulls.
+    we also allow zero-length strings.
 
     :param node: Node in JSON schema.
     """
     try:
-        # TODO Update singer.schema to support anyOf. Until then we don't have a
-        #      way of accepting both date-times and empty strings.
-        # if node['format'] == 'date-time' and isinstance(node['type'], str):
-            # del node['format']
-            # del node['type']
-            # node['anyOf'] = [{'type': ['null', 'string'], 'format': 'date-time'},
-                             # {'type': 'string', 'maxLength': 0}]
-        if node['format'] == 'date-time':
+        if node['format'] == 'date-time' and isinstance(node['type'], str):
             del node['format']
+            del node['type']
+            node['anyOf'] = [{'type': ['null', 'string'], 'format': 'date-time'},
+                             {'type': 'string', 'maxLength': 0}]
     except (TypeError, KeyError):
         pass
 
-def null_empty(node):
-    """Change empty string to None.
-
-    :param node: Node in JSON structure.
-    """
-    if isinstance(node, abc.Mapping):
-        for k, v in node.items():
-            if isinstance(v, str) and v == '':
-                node[k] = None
-    elif isinstance(node, abc.Sequence) and not isinstance(node, str):
-        for idx, v in enumerate(node):
-            if isinstance(v, str) and v == '':
-                node[idx] = None
 
 def walk(node, visit):
     """Walk every node in a JSON object and apply visit procedure to each."""

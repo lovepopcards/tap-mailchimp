@@ -1,11 +1,15 @@
 """MailChimpTap for singer.io."""
 
+import itertools
 import datetime as dt
 import dateutil as du
 import mailchimp3
 import singer
-import tap_mailchimp.config as cfg
 import tap_mailchimp.utils as taputils
+
+DEFAULT_COUNT = 50
+DEFAULT_LAG = 7
+
 
 def mailchimp_gen(base, attr, item_key=None, **kwargs):
     """Generator to iterate over mailchimp responses.
@@ -53,145 +57,104 @@ class MailChimpTap:
     :param dict state: State object from singer.
     """
 
-    def __init__(self, config, state, catalog=None):
+    def __init__(self, config, state):
         self.config = config
         self.state = state
-        username, api_key = config[cfg.username], config[cfg.api_key]
+        username, api_key = config['username'], config['api_key']
         self.client = mailchimp3.MailChimp(username, api_key)
+        self.last_record = state.get('last_record')
 
-    def start_date(self, stream, use_lag=True):
-        """Return the time to start the stream.
+    @property
+    def count(self):
+        return self.config.get('count', DEFAULT_COUNT)
 
-        Subtract lag_days given in configuration. This makes the assumption
-        that for most campaign email activity we care about activity within
-        lag_days.
-
-        :param str stream: Stream name for which to get the date.
-        :param boolean use_lag: Whether to use lag days from config, optional,
-                                default is True.
-        :return: Time to start the stream, or None to get data for all time.
-        :rtype: datetime.datetime
-        """
-        mark = singer.get_bookmark(self.state, stream, cfg.last_record)
-        if mark:
-            start = du.parser.parse(mark)
-        else:
-            cfg_start = self.config[cfg.start_date]
-            if cfg_start == '' or cfg_start == '*':
+    @property
+    def start_date(self):
+        try:
+            return du.parser.parse(self.state['last_record'])
+        except KeyError:
+            date = self.config['start_date']
+            if date == '' or date == '*':
                 return None
-            start = du.parser.parse(cfg_start)
-        if use_lag:
-            lag_days = dt.timedelta(days=self.config[cfg.lag_days])
-            return start - lag_days
-        else:
-            return start
+            return du.parser.parse(date)
+
+    @property
+    def lag(self):
+        return self.config.get('lag_days', DEFAULT_LAG)
 
     def pour(self):
         """Pour schemata and data from the Mailchimp tap."""
         with singer.job_timer(job_type='mailchimp'):
-            self.pour_lists()
-            self.pour_list_members()
-            self.pour_campaigns()
-            self.pour_email_activity_reports()
+            self.last_record = dt.datetime.now(du.tz.tzutc())
+            list_ids = self.pour_lists()
+            self.pour_list_members(list_ids)
+            campaign_ids = self.pour_campaigns()
+            self.pour_email_activity_reports(campaign_ids)
+            self.state.update({'last_record': self.last_record.isoformat()})
             singer.write_state(self.state)
 
-    def _gen_args(self, stream, date_key=None, with_count=True, use_lag=True):
-        args = {}
-        if with_count:
-            args['count'] = self.config[cfg.count]
-        if date_key is not None:
-            start_date = self.start_date(stream, use_lag=use_lag)
-            if start_date:
-                args[date_key] = start_date.isoformat()
-        return args
-
     def pour_lists(self):
-        name = cfg.lists
+        name = 'lists'
+        list_ids = set()
         with singer.job_timer(job_type=name):
-            stream = self.catalog.get_stream(name)
-            singer.set_currently_syncing(self.state, stream.tap_stream_id)
-            singer.write_schema(name, stream.schema.to_dict(), stream.key_properties, stream.stream_alias)
-            args = self._gen_args(name, date_key=cfg.date_key[name])
-            dates = []
-            with singer.record_counter(endpoint=cfg.endpoint[name]) as counter:
-                for record in mailchimp_gen(self.client, cfg.api_attr[name], **args):
+            schema = taputils.get_schema(name)
+            singer.write_schema(name, schema, key_properties='id')
+            with singer.record_counter(endpoint=name) as counter:
+                for record in mailchimp_gen(self.client, name, count=self.count):
                     singer.write_record(name, record)
-                    try:
-                        dates.append(du.parser.parse(record['stats']['campaign_last_sent']))
-                    except:
-                        pass
+                    list_ids.add(record['id'])
                     counter.increment()
-            if len(dates) > 0:
-                max_date = max(dates)
-                singer.write_bookmark(self.state, name, cfg.last_record, max_date.isoformat())
+        return list_ids
 
-    def _list_ids(self, stream):
-        name = cfg.lists
-        args = self._gen_args(stream, date_key=cfg.date_key[name], with_count=False)
-        with singer.http_request_timer(endpoint=name):
-            response = self.client.lists.all(get_all=True, fields='lists.id', **args)
-        return set([item['id'] for item in response['lists']])
-
-    def pour_list_members(self):
-        name = cfg.list_members
+    def pour_list_members(self, list_ids):
+        name = 'list_members'
         with singer.job_timer(job_type=name):
-            stream = self.catalog.get_stream(name)
-            singer.set_currently_syncing(self.state, stream.tap_stream_id)
-            singer.write_schema(name, stream.schema.to_dict(), stream.key_properties, stream.stream_alias)
-            args = self._gen_args(name, cfg.date_key[name], use_lag=False)
-            list_ids = self._list_ids(name)
-            dates = []
-            with singer.record_counter(endpoint=cfg.endpoint[name]) as counter:
+            schema = taputils.get_schema(name)
+            singer.write_schema(name, schema, key_properties='id')
+            args = {}
+            if self.start_date is not None:
+                args['since_last_changed'] = self.start_date.isoformat()
+            with singer.record_counter(endpoint=name) as counter:
                 for id in list_ids:
-                    for record in mailchimp_gen(self.client.lists, cfg.api_attr[name], list_id=id, **args):
+                    for record in mailchimp_gen(self.client.lists, 'members',
+                                                list_id=id, count=self.count, **args):
                         singer.write_record(name, record)
-                        try:
-                            dates.append(du.parser.parse(record['last_changed']))
-                        except (KeyError, ValueError):
-                            pass
                         counter.increment()
-            if len(dates) > 0:
-                max_date = max(dates)
-                singer.write_bookmark(self.state, name, cfg.last_record, max_date.isoformat())
 
     def pour_campaigns(self):
-        name = cfg.campaigns
+        name = 'campaigns'
+        campaign_ids = set()
         with job_timer(job_type=name):
-            stream = self.catalog.get_stream(name)
-            singer.set_currently_syncing(self.state, stream.tap_stream_id)
-            singer.write_schema(name, stream.schema.to_dict(), stream.key_properties, stream.stream_alias)
-            args = self._gen_args(name, cfg.date_key[name])
-            dates = []
-            with singer.record_counter(endpoint=cfg.endpoint[name]) as counter:
-                for record in mailchimp_gen(self.client, cfg.api_attr[name], **args):
+            schema = taputils.get_schema(name)
+            singer.write_schema(name, schema, key_properties='id')
+            if self.start_date is None:
+                gen = mailchimp_gen(self.client, name, count=self.count)
+            else:
+                past_date = self.start_date - dt.timedelta(days=self.lag)
+                gen_create = mailchimp_gen(self.client, name, count=self.count,
+                                           since_create_time=past_date.isoformat())
+                gen_send = mailchimp_gen(self.client, name, count=self.count,
+                                         since_send_time=past_date.isoformat())
+                gen = itertools.chain(gen_create, gen_send)
+            with singer.record_counter(endpoint=name) as counter:
+                for record in gen:
+                    if record['id'] in campaign_ids:
+                        # already processed (duplicate); happens when created
+                        # and send dates after cutoff
+                        continue
                     singer.write_record(name, record)
-                    try:
-                        dates.append(du.parser.parse(record['send_time']))
-                    except (KeyError, ValueError):
-                        pass
+                    campaign_ids.add(record['id'])
                     counter.increment()
-            if len(dates) > 0:
-                max_date = max(dates)
-                singer.write_bookmark(self.state, name, cfg.last_record, max_date.isoformat())
+        return campaign_ids
 
-    def _campaign_ids(self, stream):
-        name = cfg.campaigns
-        args = self._gen_args(stream, date_key=cfg.date_key[name], with_count=False)
-        with singer.http_request_timer(endpoint=name):
-            response = self.client.campaigns.all(get_all=True, fields='campaigns.id', **args)
-        return set([item['id'] for item in response['campaigns']])
-
-    def pour_email_activity_reports(self):
-        name = cfg.email_activity_reports
+    def pour_email_activity_reports(self, campaign_ids):
+        name = 'email_activity_reports'
         with singer.job_timer(job_type=name):
-            stream = self.catalog.get_stream(name)
-            singer.set_currently_syncing(self.state, stream.tap_stream_id)
-            singer.write_schema(name, stream.schema.to_dict(), stream.key_properties, stream.stream_alias)
-            args = self._gen_args(name)
-            campaign_ids = self._campaign_ids(name)
-            with singer.record_counter(endpoint=endpoint) as counter:
+            schema = taputils.get_schema(name)
+            singer.write_schema(name, schema, key_properties=['campaign_id', 'email_id'])
+            with singer.record_counter(endpoint=name) as counter:
                 for id in campaign_ids:
                     for record in mailchimp_gen(self.client.reports, 'email_activity',
-                                                  campaign_id=id, **args):
+                                                campaign_id=id, count=self.count):
                         singer.write_record(name, record)
                         counter.increment()
