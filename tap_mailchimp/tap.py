@@ -1,14 +1,28 @@
 """MailChimpTap for singer.io."""
 
+import time
 import itertools
+import json
 import datetime as dt
 import dateutil as du
 import mailchimp3
 import singer
+import singer.logger
 import tap_mailchimp.utils as taputils
 
 DEFAULT_COUNT = 50
 DEFAULT_LAG = 7
+MAX_RETRIES = 5
+
+
+def log_progress(logger, count, total, endpoint):
+    data = {
+        'type': 'progress',
+        'metric': 'progress_counter',
+        'value': count,
+        'tags': { 'endpoint': endpoint, 'total_items': total }
+    }
+    logger.info('METRIC: %s', json.dumps(data))
 
 
 def mailchimp_gen(base, attr, endpoint=None, item_key=None, **kwargs):
@@ -45,13 +59,25 @@ def mailchimp_gen(base, attr, endpoint=None, item_key=None, **kwargs):
     if endpoint is None:
         endpoint = attr
     api_method = getattr(base, attr)
+    logger = singer.logger.get_logger()
     while process_count < total_items:
-        with singer.http_request_timer(endpoint=endpoint):
-            response = api_method.all(offset=process_count, **kwargs)
+        retry_count = 0
+        while retry_count < MAX_RETRIES:
+            retry_count += 1
+            try:
+                with singer.http_request_timer(endpoint=endpoint):
+                    response = api_method.all(offset=process_count, **kwargs)
+                break
+            except Exception as e:
+                logger.error('Attempt {}/{}: {}'.format(retry_count, MAX_RETRIES, e))
+                if retry_count == MAX_RETRIES:
+                    raise
+                time.sleep(2 ** retry_count)
         items, total_items = taputils.pluck(response, item_key, 'total_items')
         for i in items:
             yield i
             process_count += 1
+        log_progress(logger, process_count, total_items, endpoint)
 
 
 class MailChimpTap:
@@ -100,8 +126,8 @@ class MailChimpTap:
         """Pour schemata and data from the Mailchimp tap."""
         with singer.job_timer(job_type='mailchimp'):
             self.last_record = dt.datetime.now(du.tz.tzutc())
-            list_ids = self.pour_lists()
-            self.pour_list_members(list_ids)
+            # list_ids = self.pour_lists()
+            # self.pour_list_members(list_ids)
             campaign_ids = self.pour_campaigns()
             self.pour_email_activity_reports(campaign_ids)
             self.state.update({'last_record': self.last_record.isoformat()})
@@ -145,7 +171,7 @@ class MailChimpTap:
                 gen = mailchimp_gen(self.client, name, count=self.count)
             else:
                 gen_create = mailchimp_gen(self.client, name, count=self.count,
-                                           since_create_time=self.lag_date.isoformat())
+                                           since_create_time=self.start_date.isoformat())
                 gen_send = mailchimp_gen(self.client, name, count=self.count,
                                          since_send_time=self.lag_date.isoformat())
                 gen = itertools.chain(gen_create, gen_send)
