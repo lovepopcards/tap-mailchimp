@@ -60,6 +60,9 @@ def mailchimp_gen(base, attr, endpoint=None, item_key=None, **kwargs):
         endpoint = attr
     api_method = getattr(base, attr)
     logger = singer.logger.get_logger()
+    if endpoint == 'email_activity_reports' and kwargs.get('campaign_id') == '64eed7207d':
+        logger.info('Campaign 64eed7207d skipping to email activity record %d', 264650)
+        process_count = 264650
     while process_count < total_items:
         retry_count = 0
         while retry_count < MAX_RETRIES:
@@ -188,11 +191,16 @@ class MailChimpTap:
 
     def pour_email_activity_reports(self, campaign_ids):
         name = 'email_activity_reports'
+        with open('/Users/mikeprentice/codebase/tap-mailchimp/tmp/processed_campaign_ids.txt', 'r') as f:
+            skip_ids = set([id.strip() for id in f.readlines()]) - set(['64eed7207d'])
         with singer.job_timer(job_type=name):
             schema = taputils.get_schema(name)
             singer.write_schema(name, schema, key_properties=['campaign_id', 'email_id'])
             with singer.record_counter(endpoint=name) as counter:
                 for id in campaign_ids:
+                    if id in skip_ids:
+                        singer.logger.get_logger().info('Skipping already processed campaign %s', id)
+                        continue
                     for record in mailchimp_gen(self.client.reports, 'email_activity', endpoint=name,
                                                 item_key='emails', campaign_id=id, count=self.count):
                         singer.write_record(name, record)
