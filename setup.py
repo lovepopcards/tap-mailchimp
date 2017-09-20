@@ -1,7 +1,10 @@
 from setuptools import setup
 
 setup(name='tap-mailchimp',
-      version='0.1.a.dev',
+      version='0.1a1',
+      description='Singer.io tap for extracting data from the MailChimp API',
+      author='Lovepop',
+      url='https://singer.io',
       install_requires=['python-dateutil',
                         'singer-python',
                         'mailchimp3',
