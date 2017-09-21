@@ -30,7 +30,8 @@ def log_progress(logger, count, total, endpoint, **extra_tags):
     logger.info('METRIC: %s', json.dumps(data))
 
 
-def mailchimp_gen(base, attr, endpoint=None, item_key=None, offset=0, **kwargs):
+def mailchimp_gen(base, attr, endpoint=None, item_key=None, offset=0,
+                  count=DEFAULT_COUNT, **kwargs):
     """Generator to iterate over mailchimp responses.
 
     Mailchimp returns a subset of total data, and uses an `offset` parameter to
@@ -74,7 +75,7 @@ def mailchimp_gen(base, attr, endpoint=None, item_key=None, offset=0, **kwargs):
             retry_count += 1
             try:
                 with http_request_timer(endpoint=endpoint):
-                    response = api_method.all(offset=process_count, **kwargs)
+                    response = api_method.all(offset=process_count, count=count, **kwargs)
                 break
             except Exception as e:
                 logger.error('Attempt {}/{}: {}'.format(retry_count, MAX_RETRIES, e))
