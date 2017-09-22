@@ -147,8 +147,8 @@ class MailChimpTap:
         if not self.state.get('current_run'):
             self.state['current_run'] = dt.datetime.now(du.tz.tzutc()).isoformat()
         with job_timer(job_type='mailchimp'):
-            for stream_id in ('lists', 'list_members', 'campaigns',
-                           'email_activity_reports'):
+            for stream_id in ('lists', 'campaigns', 'list_members'
+                              'email_activity_reports'):
                 self.pour_stream(stream_id)
         self.state = {'last_record': self.state['current_run']}
         write_state(self.state)
