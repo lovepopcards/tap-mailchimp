@@ -1,14 +1,16 @@
 """Entry point for tap-mailchimp."""
 
 import singer.utils
+from .config import TapConfig
+from .state import TapState
 from tap_mailchimp.tap import MailChimpTap
-
-REQUIRED_KEYS = ['username', 'api_key', 'start_date']
 
 def main():
     """Entry point for tap-mailchimp."""
-    args = singer.utils.parse_args(REQUIRED_KEYS)
-    tap = MailChimpTap(args.config, args.state)
+    args = singer.utils.parse_args(TapConfig.required_keys)
+    cfg = TapConfig(args.config)
+    state = TapState(args.state)
+    tap = MailChimpTap(cfg, state)
     if args.discover:
         raise NotImplementedError('Discovery not yet implemented.')
     elif args.catalog is not None:

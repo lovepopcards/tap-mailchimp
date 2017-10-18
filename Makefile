@@ -1,9 +1,13 @@
-.PHONY: deps test
+.PHONY: test venv clean
 
-deps: requirements.txt
-	pip3 install --requirement requirements.txt
+deps: requirements.in
+	pip3 install --upgrade --requirement requirements.in
+
+requirements.txt: requirements.in
+	pip3 freeze > requirements.txt
+
+freeze: requirements.txt
 
 test:
-	echo 'No tests yet'
-
+	pytest
 

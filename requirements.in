@@ -1,0 +1,6 @@
+mailchimp3
+pytest
+python-dateutil
+requests
+singer-python
+singer-tools

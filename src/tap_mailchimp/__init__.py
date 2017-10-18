@@ -9,5 +9,4 @@ Tap data:
 By default all data is tapped.
 """
 
-from tap_mailchimp.tap import MailChimpTap
 from tap_mailchimp.main import main
