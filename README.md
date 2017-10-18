@@ -1,4 +1,4 @@
-# tap-facebook
+# tap-mailchimp
 
 This is a [Singer](https://singer.io) tap that produces JSON-formatted data
 following
