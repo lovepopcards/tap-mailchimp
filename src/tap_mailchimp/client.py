@@ -83,9 +83,15 @@ class MailChimp:
                                      headers=self._headers)
         with closing(response):
             _iter = response.iter_lines()
-            headers = json.loads(next(_iter))
+            first_line = next(_iter)
+            if isinstance(first_line, bytes):
+                first_line = first_line.decode('utf-8')
+            headers = json.loads(first_line)
             for l in _iter:
-                yield dict(zip(headers, json.loads(l)))
+                if isinstance(l, bytes):
+                    l = l.decode('utf-8')
+                record = json.loads(l)
+                yield dict(zip(headers, record))
 
     def list_export_api_v3(self, list_id, status=Status.subscribed, **kwargs):
         merge_fields_gen = self.iter_items('lists.merge_fields', list_id=list_id,
@@ -117,6 +123,8 @@ class MailChimp:
                                      headers=self._headers)
         with closing(response):
             for l in response.iter_lines():
+                if isinstance(l, bytes):
+                    l = l.decode('utf-8')
                 # ignore empty lines
                 if len(l.strip()) > 0:
                     yield json.loads(l)
