@@ -130,7 +130,7 @@ class MailChimp:
     def subscriber_activity_export_api_v3(self, campaign_id, **kwargs):
         campaign_meta = self.campaigns.get(campaign_id=campaign_id)
         list_id = campaign_meta['recipients']['list_id']
-        since = self._format_time_for_export(kwargs.pop('since'))
+        since = self._format_time_for_export(kwargs.pop('since', None))
         for item in self.subscriber_activity_export(campaign_id,
                                                     since=since,
                                                     **kwargs):
