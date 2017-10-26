@@ -9,7 +9,7 @@ def read(*names, encoding='utf8'):
     return open(join(dirname(__file__), *names), encoding=encoding).read()
 
 setup(name='tap-mailchimp',
-      version='0.2.2a',
+      version='0.2.3a',
       license='MIT',
       description='Singer.io tap for extracting data from the MailChimp API',
       long_description=read('README.rst'),

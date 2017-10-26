@@ -23,8 +23,9 @@ class TapState(JsonObject):
     def __init__(self, state=None):
         state = state or {}
         self.last_run = state.get(Keys.last_run)
-        self.current_run = state.get(Keys.current_run,
-                                     datetime.now(dateutil.tz.tzutc()))
+        self.current_run = (
+            state.get(Keys.current_run) or datetime.now(dateutil.tz.tzutc())
+        )
         self.currently_syncing = state.get(Keys.currently_syncing)
         self.bookmarks = state.get(Keys.bookmarks, {})
         self._current_session = time.time()
