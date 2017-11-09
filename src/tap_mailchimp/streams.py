@@ -282,9 +282,9 @@ class ListMemberStream(TapItemStream):
     def _convert_interests(self, record):
         interest_dict = record.get('interests', {})
         interest_list = []
-        for interest_id, interest_value in interest_dict.items():
+        for interest_id, interest_value in record.get('interests', {}).items():
             interest_list.append({'id': interest_id, 'value': interest_value})
-        interest_dict['interests'] = interest_list
+        record['interests'] = interest_list
 
     def _write_record(self, record):
         if self._config.merge_fields_array:
