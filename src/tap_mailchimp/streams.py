@@ -201,6 +201,8 @@ class CampaignStream(TapStream):
             yield from itertools.chain(gen_create, gen_send)
 
 class ListMemberStream(TapItemStream):
+    key_properties = ['id', 'list_id']
+
     def __init__(self, client, list_id, config, state):
         super().__init__(client, Stream.list_members, list_id, config, state)
         self._merge_fields = None
@@ -280,7 +282,6 @@ class ListMemberStream(TapItemStream):
         record['merge_fields'] = mf_list
 
     def _convert_interests(self, record):
-        interest_dict = record.get('interests', {})
         interest_list = []
         for interest_id, interest_value in record.get('interests', {}).items():
             interest_list.append({'id': interest_id, 'value': interest_value})
